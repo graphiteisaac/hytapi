@@ -3,6 +3,7 @@ main = "./build/dev/javascript/hytapi/index.js"
 compatibility_date = "2025-06-17"
 
 [[d1_databases]]
-binding = "db_prod"
-database_name = "db-prod"
-database_id = "2f141b33-23db-4a98-a863-2a0adb184149"
+binding = "hytapi_prod"
+database_name = "hytapi-prod"
+database_id = "5ac863e0-df1b-4aec-a52d-01f138ddfd66"
+

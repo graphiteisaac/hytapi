@@ -14,7 +14,7 @@ import plinth/cloudflare/worker
 
 pub fn fetch(req, env, ctx) {
   let assert Ok(db) =
-    bindings.d1_database(env, "db_prod")
+    bindings.d1_database(env, "hytapi_prod")
     |> result.replace_error(fn(e) { echo e })
 
   let req = conversation.to_gleam_request(req)
