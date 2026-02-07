@@ -2,8 +2,10 @@ name = "hytapi"
 main = "./build/dev/javascript/hytapi/index.js"
 compatibility_date = "2025-06-17"
 
+compatibility_flags = [ "nodejs_compat_v2" ]
+
 [[d1_databases]]
 binding = "hytapi_prod"
-database_name = "hytapi-prod"
-database_id = "5ac863e0-df1b-4aec-a52d-01f138ddfd66"
-
+database_name = "hytapi_prod"
+database_id = "ac6d018a-ae20-4ed0-9e75-f96aaf64b5fc"
+migrations_dir = "./migrations"

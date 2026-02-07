@@ -1,13 +1,15 @@
+import gleam/javascript/promise
 import gleeunit
+import hytapi
 
 pub fn main() -> Nil {
   gleeunit.main()
 }
 
-// gleeunit test functions end in `_test`
-pub fn hello_world_test() {
-  let name = "Joe"
-  let greeting = "Hello, " <> name <> "!"
+pub fn dns_test() {
+  use value <- promise.await(hytapi.resolve_dns("one.one.one.one"))
 
-  assert greeting == "Hello, Joe!"
+  assert value == Ok("1.0.0.1") || value == Ok("1.1.1.1")
+
+  promise.resolve(Nil)
 }
