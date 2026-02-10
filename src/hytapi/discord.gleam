@@ -4,7 +4,9 @@ import gleam/http
 import gleam/http/request
 import gleam/javascript/promise.{type Promise}
 import gleam/json
+import gleam/list
 import gleam/uri
+import hytapi/allowlist
 
 pub fn redirect_uri(client_id: String, redirect_uri: String) {
   "https://discord.com/api/oauth2/authorize"
@@ -75,4 +77,8 @@ pub fn token_user_id(token: String) -> Promise(Result(String, fetch.FetchError))
     Ok(user_id) -> promise.resolve(Ok(user_id))
     Error(_) -> promise.resolve(Error(fetch.UnableToReadBody))
   }
+}
+
+pub fn is_user_allowed(user_id: String) -> Bool {
+  list.contains(allowlist.user_ids, user_id)
 }

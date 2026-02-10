@@ -1,5 +1,6 @@
 import conversation.{type RequestBody, type ResponseBody}
 import gleam/bit_array
+import gleam/bool
 import gleam/crypto
 import gleam/dynamic
 import gleam/dynamic/decode
@@ -15,6 +16,7 @@ import gleam/option
 import gleam/result
 import gleam/string
 import gleam/uri
+import hytapi/allowlist
 import hytapi/discord
 import hytapi/sql
 import hytapi/web
@@ -25,9 +27,7 @@ import plinth/cloudflare/worker
 const auth_cookie = "__AUTH"
 
 pub fn handle(req, env, ctx) {
-  let assert Ok(db) =
-    bindings.d1_database(env, "hytapi_prod")
-    |> result.replace_error(fn(e) { echo e })
+  let assert Ok(db) = bindings.d1_database(env, "hytapi_prod")
 
   let assert Ok(secrets) = get_secrets(env)
   let req = conversation.to_gleam_request(req)
@@ -58,174 +58,88 @@ type Secrets {
 
 fn do_fetch(context: Context) -> Promise(Response(ResponseBody)) {
   let Context(req:, ..) = context
+
   case uri.path_segments(req.path) {
     [] -> home(context)
+    ["login"] -> login(context)
     ["auth", "discord"] -> discord_auth(context)
     ["auth", "discord", "callback"] -> discord_callback(context)
     ["auth", "logout"] -> logout()
-    ["v1", "new"] -> new_server(context)
-    ["v1", "set", hostname] -> set_server(context, hostname)
-    ["v1", "players", hostname] -> {
-      // TODO: Resolve given hostname to a real hostname
-      response.new(200)
-      |> response.set_body(conversation.Text(
-        "(Not implemented) Ping " <> hostname,
-      ))
-      |> promise.resolve
+    ["new"] -> new_server(context)
+    ["delete", id] -> delete_server(context, id)
+    ["v0", "set", key, players] -> set_server(context, key, players)
+    ["v0", "players", hostname] -> playercount(context, hostname)
+    ["debug"] -> {
+      case context.req.host {
+        "localhost" -> debug_view(context)
+        _ ->
+          response.new(404)
+          |> response.set_body(conversation.Text("Page not found"))
+          |> Error
+          |> promise.resolve
+      }
     }
     _ ->
       response.new(404)
       |> response.set_body(conversation.Text("Page not found"))
+      |> Error
       |> promise.resolve
   }
-}
-
-fn home(context: Context) -> Promise(Response(ResponseBody)) {
-  use user_id, _ <- require_auth(context)
-  use servers <- promise.await(sql.get_user_servers(context.db, user_id))
-
-  // let table =
-  //   tobble.builder()
-  //   |> tobble.add_row(["id", "hostname", "players", "key"])
-
-  case servers {
-    Ok(servers) -> {
-      // let assert Ok(table) =
-      //   list.fold(servers, table, fn(table, server) {
-      //     tobble.add_row(table, [
-      //       int.to_string(server.id),
-      //       server.hostname,
-      //       int.to_string(server.players_online),
-      //       server.key,
-      //     ])
-      //   })
-      //   |> tobble.add_row(["", "<a href=\"/v1/new\">create new</a>", "", ""])
-      //   |> tobble.build
-      //
-      // let output =
-      //   "<!DOCTYPE html><html><head><title>hytapi</title><body><pre>"
-      //   <> tobble.render(table)
-      //   <> "</pre></body></html>"
-      [web.home(servers)]
-      |> web.layout
-      |> web.render
-      |> promise.resolve
+  |> promise.map(fn(result) {
+    case result {
+      Ok(resp) | Error(resp) -> resp
     }
-    Error(_) ->
-      response.new(200)
-      |> response.set_body(conversation.Text(string.inspect(servers)))
-      |> promise.resolve
-  }
+  })
 }
 
-fn discord_auth(context: Context) -> Promise(Response(ResponseBody)) {
-  let auth_url =
-    discord.redirect_uri(
-      context.secrets.discord_client_id,
-      context.secrets.discord_redirect_uri,
-    )
+fn debug_view(context: Context) {
+  use servers <- promise.await(sql.get_all_servers(context.db))
 
-  response.new(302)
-  |> response.set_header("location", auth_url)
-  |> response.set_body(conversation.Text("Redirecting to Discord..."))
+  response.new(200)
+  |> response.set_body(conversation.Text(string.inspect(servers)))
+  |> Ok
   |> promise.resolve
 }
 
-fn discord_callback(context: Context) {
-  let Context(
-    secrets: Secrets(
-      discord_client_id:,
-      discord_client_secret:,
-      discord_redirect_uri:,
-      ..,
-    ),
-    req:,
-    ..,
-  ) = context
-
-  // Get authorization code from query params
-  let code_result =
-    req.query
-    |> option.unwrap("")
-    |> uri.parse_query
-    |> result.try(list.key_find(_, "code"))
-
-  case code_result {
-    Ok(code) -> {
-      // Exchange code for access token
-      use token_response <- promise.await(discord.exchange_code_for_token(
-        discord_client_id,
-        discord_client_secret,
-        discord_redirect_uri,
-        code,
-      ))
-
-      case token_response {
-        Ok(token) -> {
-          // Get user info from Discord
-          use user_response <- promise.await(discord.token_user_id(token))
-
-          case user_response {
-            Ok(user_id) -> {
-              use user <- promise.await(sql.get_or_create_user(
-                context.db,
-                user_id,
-              ))
-              case user {
-                Ok(user) -> {
-                  let cookie_string =
-                    int.to_string(user.id) <> "_" <> user.discord_id
-
-                  let session_token =
-                    sign_cookie(cookie_string, context.secrets.key)
-
-                  response.new(302)
-                  |> response.set_header("location", "/")
-                  |> response.set_body(conversation.Text(
-                    "Authentication successful: " <> string.inspect(user),
-                  ))
-                  |> response.set_cookie(
-                    auth_cookie,
-                    session_token,
-                    cookie.Attributes(
-                      max_age: option.Some(2_592_000),
-                      domain: option.None,
-                      path: option.Some("/"),
-                      secure: True,
-                      http_only: True,
-                      same_site: option.Some(cookie.Lax),
-                    ),
-                  )
-                  |> promise.resolve
-                }
-                Error(_) ->
-                  response.new(401)
-                  |> response.set_body(conversation.Text(
-                    "could not retrieve user",
-                  ))
-                  |> promise.resolve
-              }
-            }
-            Error(_) -> {
-              response.new(500)
-              |> response.set_body(conversation.Text("Failed to get user info"))
-              |> promise.resolve
-            }
-          }
-        }
-        Error(_) -> {
-          response.new(500)
-          |> response.set_body(conversation.Text("Failed to get access token"))
-          |> promise.resolve
-        }
-      }
-    }
-    Error(_) -> {
+fn playercount(
+  context: Context,
+  hostname: String,
+) -> Promise(Result(Response(ResponseBody), Response(ResponseBody))) {
+  use dns <- promise.try_await(
+    resolve_dns(hostname)
+    |> promise.map(result.replace_error(
+      _,
       response.new(400)
-      |> response.set_body(conversation.Text("Missing authorization code"))
-      |> promise.resolve
-    }
-  }
+        |> response.set_header("Content-Type", "application/json")
+        |> response.set_body(conversation.Text(
+          "{\"error\":\"DNS resolution failed\"}",
+        )),
+    )),
+  )
+
+  use status <- promise.try_await(
+    sql.get_server_status(context.db, dns)
+    |> promise.map(result.replace_error(
+      _,
+      response.new(400)
+        |> response.set_header("Content-Type", "application/json")
+        |> response.set_body(conversation.Text(
+          "{\"error\":\"Server not found\"}",
+        )),
+    )),
+  )
+
+  response.new(200)
+  |> response.set_header("Content-Type", "application/json")
+  |> response.set_body(conversation.Text(
+    "{\"players\":\""
+    <> int.to_string(status.players)
+    <> "\",\"updated_at\":"
+    <> int.to_string(status.updated_at)
+    <> "}",
+  ))
+  |> Ok
+  |> promise.resolve
 }
 
 fn logout() {
@@ -243,63 +157,305 @@ fn logout() {
     ),
   )
   |> response.set_body(conversation.Text("Successful logout"))
+  |> Ok
   |> promise.resolve
 }
 
-fn set_server(context: Context, hostname: String) {
-  use key <- extract_key(context.req)
-  // let query =
-  //   d1.prepare(
-  //     context.db,
-  //     "INSERT INTO servers (hostname, players, updated_at) VALUES (?1, ?2, now()) ON CONFLICT(hostname) DO UPDATE SET players = ?2, updated_at = now()",
-  //   )
-  // d1.bind(query, [hostname, int.to_string(players)])
+fn set_server(context: Context, key: String, player_str: String) {
+  let ip = user_ip(context.req)
+  let players =
+    int.parse(player_str)
+    |> result.unwrap(0)
+
+  use _server_status <- promise.try_await(
+    sql.set_server_status(context.db, key, ip, players)
+    |> promise.map(result.replace_error(
+      _,
+      response.new(500)
+        |> response.set_body(conversation.Text("Error updating server")),
+    )),
+  )
 
   response.new(200)
+  |> response.set_header("Content-Type", "application/json")
   |> response.set_body(conversation.Text(
-    "(Not implemented) Set status (" <> key <> ")" <> hostname,
+    "{\"status\":\"OK\",\"players\":" <> player_str <> "}",
   ))
+  |> Ok
   |> promise.resolve
 }
 
-fn extract_key(
-  req: Request(RequestBody),
-  next: fn(String) -> Promise(Response(ResponseBody)),
-) -> Promise(Response(ResponseBody)) {
-  let resp =
-    response.new(401)
-    |> response.set_body(conversation.Text("you must provide a key"))
-    |> promise.resolve
-
-  case uri.parse_query(option.unwrap(req.query, "0")) {
-    Ok(params) ->
-      case list.key_find(params, "key") {
-        Ok(key) -> next(key)
-        Error(_) -> resp
+fn new_server(
+  context: Context,
+) -> Promise(Result(Response(ResponseBody), Response(ResponseBody))) {
+  use user_id <- require_auth(context)
+  case context.req.method {
+    http.Post -> {
+      use formdata <- promise.await(conversation.read_form(context.req.body))
+      case formdata {
+        Ok(conversation.FormData(values: [#("label", label)], ..)) ->
+          handle_create(user_id, context, label)
+        _ ->
+          response.new(500)
+          |> response.set_body(conversation.Text(
+            "the form data submitted was not correct",
+          ))
+          |> Error
+          |> promise.resolve
       }
-    Error(_) -> resp
+    }
+    _ -> {
+      [web.create_server()]
+      |> web.layout
+      |> web.render
+      |> Ok
+      |> promise.resolve
+    }
   }
 }
 
-fn new_server(context: Context) {
+fn delete_server(
+  context: Context,
+  id_str: String,
+) -> Promise(Result(Response(ResponseBody), Response(ResponseBody))) {
+  use user_id <- require_auth(context)
+  use id <- promise.try_await(
+    int.parse(id_str)
+    |> result.replace_error(
+      response.new(500)
+      |> response.set_body(conversation.Text(
+        "the provided server ID must be a whole number",
+      )),
+    )
+    |> promise.resolve,
+  )
+
+  use server <- promise.try_await(
+    sql.get_server_by_id(context.db, id)
+    |> promise.map(result.replace_error(
+      _,
+      response.new(500)
+        |> response.set_body(conversation.Text(
+          "the form data submitted was not correct",
+        )),
+    )),
+  )
+
   case context.req.method {
-    http.Post -> {
-      response.new(200)
-      |> response.set_body(conversation.Text("Bello"))
-    }
+    http.Post -> handle_delete(context, user_id, id)
+
     _ -> {
-      [web.home([])]
+      [web.delete_server(server)]
       |> web.layout
       |> web.render
+      |> Ok
+      |> promise.resolve
     }
   }
+}
+
+fn handle_create(
+  user_id: String,
+  context: Context,
+  label: String,
+) -> Promise(Result(Response(ResponseBody), Response(ResponseBody))) {
+  use <- bool.guard(
+    label == "",
+    response.new(500)
+      |> response.set_body(conversation.Text("labels cannot be empty"))
+      |> Error
+      |> promise.resolve,
+  )
+
+  use created <- promise.try_await(
+    sql.create_new_server(context.db, label)
+    |> promise.map(
+      result.map_error(_, fn(err) {
+        response.new(500)
+        |> response.set_body(conversation.Text(
+          "could not get server: " <> string.inspect(err),
+        ))
+      }),
+    ),
+  )
+  use _server_op <- promise.await(sql.add_server_operator(
+    context.db,
+    created,
+    user_id,
+  ))
+
+  response.new(302)
+  |> response.set_header("Location", "/")
+  |> response.set_body(conversation.Text("Created a new server"))
+  |> Ok
+  |> promise.resolve
+}
+
+fn handle_delete(context: Context, user_id: String, server_id: Int) {
+  use res <- promise.await(sql.delete_server(context.db, user_id, server_id))
+
+  case res {
+    Ok(_) ->
+      response.new(302)
+      |> response.set_header("Location", "/")
+      |> response.set_body(conversation.Text("Deleted server successfully"))
+      |> Ok
+      |> promise.resolve
+    Error(err) ->
+      response.new(500)
+      |> response.set_body(conversation.Text(err))
+      |> Error
+      |> promise.resolve
+  }
+}
+
+fn home(
+  context: Context,
+) -> Promise(Result(Response(ResponseBody), Response(ResponseBody))) {
+  use user_id <- require_auth(context)
+  use servers <- promise.try_await(
+    sql.get_user_servers(context.db, user_id)
+    |> promise.map(result.replace_error(
+      _,
+      response.new(500)
+        |> response.set_body(conversation.Text(
+          "something went wrong while accessing the homepage",
+        )),
+    )),
+  )
+
+  [web.home(servers)]
+  |> web.layout
+  |> web.render
+  |> Ok
+  |> promise.resolve
+}
+
+fn login(
+  _context: Context,
+) -> Promise(Result(Response(ResponseBody), Response(ResponseBody))) {
+  [web.login()]
+  |> web.layout
+  |> web.render
+  |> Ok
+  |> promise.resolve
+}
+
+fn discord_auth(
+  context: Context,
+) -> Promise(Result(Response(ResponseBody), Response(ResponseBody))) {
+  let auth_url =
+    discord.redirect_uri(
+      context.secrets.discord_client_id,
+      context.secrets.discord_redirect_uri,
+    )
+
+  response.new(302)
+  |> response.set_header("location", auth_url)
+  |> response.set_body(conversation.Text("Redirecting to Discord..."))
+  |> Ok
+  |> promise.resolve
+}
+
+fn discord_callback(context: Context) {
+  let Context(
+    secrets: Secrets(
+      discord_client_id:,
+      discord_client_secret:,
+      discord_redirect_uri:,
+      ..,
+    ),
+    req:,
+    ..,
+  ) = context
+
+  // Get authorisation code from query params
+  use code <- promise.try_await(
+    req.query
+    |> option.unwrap("")
+    |> uri.parse_query
+    |> result.try(list.key_find(_, "code"))
+    |> result.replace_error(
+      response.new(400)
+      |> response.set_body(conversation.Text("Missing authorisation code")),
+    )
+    |> promise.resolve,
+  )
+
+  // Exchange code for access token
+  use token <- promise.try_await(
+    discord.exchange_code_for_token(
+      discord_client_id,
+      discord_client_secret,
+      discord_redirect_uri,
+      code,
+    )
+    |> promise.map(result.replace_error(
+      _,
+      response.new(500)
+        |> response.set_body(conversation.Text("Failed to get access token")),
+    )),
+  )
+
+  // Get user info from Discord
+  use user_id <- promise.try_await(
+    discord.token_user_id(token)
+    |> promise.map(result.replace_error(
+      _,
+      response.new(500)
+        |> response.set_body(conversation.Text("Failed to get user info")),
+    )),
+  )
+
+  use <- bool.guard(
+    !list.contains(allowlist.user_ids, user_id),
+    response.new(401)
+      |> response.set_body(conversation.Text(
+        "hytapi is currently invite-only, and you aren't authorised, sorry!",
+      ))
+      |> Error
+      |> promise.resolve,
+  )
+
+  // Get or create user in database
+  use user <- promise.try_await(
+    sql.get_or_create_user(context.db, user_id)
+    |> promise.map(result.replace_error(
+      _,
+      response.new(401)
+        |> response.set_body(conversation.Text("could not retrieve user")),
+    )),
+  )
+
+  // Create session and redirect
+  let session_token = sign_cookie(user.discord_id, context.secrets.key)
+
+  response.new(302)
+  |> response.set_header("location", "/")
+  |> response.set_body(conversation.Text(
+    "Authentication successful: " <> string.inspect(user),
+  ))
+  |> response.set_cookie(
+    auth_cookie,
+    session_token,
+    cookie.Attributes(
+      max_age: option.Some(2_592_000),
+      domain: option.None,
+      path: option.Some("/"),
+      secure: True,
+      http_only: True,
+      same_site: option.Some(cookie.Lax),
+    ),
+  )
+  |> Ok
   |> promise.resolve
 }
 
 fn require_auth(
   context: Context,
-  next: fn(Int, String) -> Promise(Response(ResponseBody)),
-) -> Promise(Response(ResponseBody)) {
+  next: fn(String) ->
+    Promise(Result(Response(ResponseBody), Response(ResponseBody))),
+) -> Promise(Result(Response(ResponseBody), Response(ResponseBody))) {
   let error = fn(message: String) {
     response.new(401)
     |> response.set_cookie(
@@ -315,23 +471,22 @@ fn require_auth(
       ),
     )
     |> response.set_body(conversation.Text(message))
+    |> Error
     |> promise.resolve
   }
 
   case list.key_find(request.get_cookies(context.req), auth_cookie) {
     Ok(cookie) ->
-      case
-        verify_cookie(cookie, context.secrets.key),
-        string.split_once(cookie, ".")
-      {
-        Ok(_), Ok(#(id, discord_id)) ->
-          case int.parse(id) {
-            Ok(id) -> next(id, discord_id)
-            _ -> error("the provided cookie was invalid")
-          }
-        _, _ -> error("the provided cookie was invalid or malformed")
+      case verify_cookie(cookie, context.secrets.key) {
+        Ok(user_id) -> next(user_id)
+        _ -> error("the provided cookie was invalid or malformed")
       }
-    Error(_) -> error("no auth cookie was provided")
+    Error(_) ->
+      response.new(302)
+      |> response.set_header("Location", "/login")
+      |> response.set_body(conversation.Text("Redirecting to /login..."))
+      |> Error
+      |> promise.resolve
   }
 }
 
@@ -385,9 +540,13 @@ fn get_secrets(
   ))
 }
 
-pub fn resolve_dns(
-  hostname: String,
-) -> Promise(Result(String, fetch.FetchError)) {
+pub type DNSError {
+  CantSend
+  NotJSON
+  CantDecode(String)
+}
+
+pub fn resolve_dns(hostname: String) -> Promise(Result(String, DNSError)) {
   let req =
     request.new()
     |> request.set_scheme(http.Https)
@@ -395,14 +554,22 @@ pub fn resolve_dns(
     |> request.set_header("accept", "application/dns-json")
     |> request.set_path("/dns-query?name=" <> hostname <> "&type=A")
 
-  use resp <- promise.try_await(fetch.send(req))
-  use resp <- promise.try_await(fetch.read_json_body(resp))
+  use resp <- promise.try_await(
+    fetch.send(req)
+    |> promise.map(result.replace_error(_, CantSend)),
+  )
+
+  use resp <- promise.try_await(
+    fetch.read_json_body(resp)
+    |> promise.map(result.replace_error(_, NotJSON)),
+  )
 
   let decoder = {
-    use answers <- decode.field(
+    use answers <- decode.optional_field(
       "Answer",
+      [hostname],
       decode.list({
-        use result <- decode.field("data", decode.string)
+        use result <- decode.optional_field("data", hostname, decode.string)
         decode.success(result)
       }),
     )
@@ -411,6 +578,16 @@ pub fn resolve_dns(
 
   case decode.run(resp.body, decoder) {
     Ok([answer, ..]) -> promise.resolve(Ok(answer))
-    _ -> promise.resolve(Error(fetch.InvalidJsonBody))
+    Ok([]) -> promise.resolve(Ok(hostname))
+    Error(err) -> {
+      promise.resolve(Error(CantDecode(string.inspect(err))))
+    }
+  }
+}
+
+fn user_ip(req: Request(a)) -> String {
+  case request.get_header(req, "Cf-Connecting-Ip") {
+    Ok(ip) -> ip
+    Error(_) -> "0.0.0.0"
   }
 }
