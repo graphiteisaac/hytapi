@@ -522,16 +522,16 @@ fn verify_cookie(signed_value: String, secret: String) -> Result(String, Nil) {
 fn get_secrets(
   env: dynamic.Dynamic,
 ) -> Result(Secrets, List(decode.DecodeError)) {
-  use key <- result.try(bindings.secret(env, "AUTH_SECRET_KEY"))
-  use discord_client_id <- result.try(bindings.secret(env, "DISCORD_CLIENT_ID"))
-  use discord_client_secret <- result.try(bindings.secret(
-    env,
-    "DISCORD_CLIENT_SECRET",
-  ))
-  use discord_redirect_uri <- result.try(bindings.secret(
-    env,
-    "DISCORD_REDIRECT_URI",
-  ))
+  let assert Ok(key) = bindings.secret(env, "AUTH_SECRET_KEY")
+    as "could not get auth secret key"
+  let assert Ok(discord_client_id) = bindings.secret(env, "DISCORD_CLIENT_ID")
+    as "could not get discord client id"
+  let assert Ok(discord_client_secret) =
+    bindings.secret(env, "DISCORD_CLIENT_SECRET")
+    as "could not get discord client secret"
+  let assert Ok(discord_redirect_uri) =
+    bindings.secret(env, "DISCORD_REDIRECT_URI")
+    as "could not get discord redirect uri"
 
   Ok(Secrets(
     key:,
