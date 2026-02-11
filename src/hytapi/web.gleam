@@ -164,118 +164,16 @@ pub fn login() {
 
 // LAYOUT
 
-const css = "
-:root {
-  --brand: #5dabea;
-}
-
-body {
-  background: #111; 
-  color: #eee;
-  font-family: 'monospace';
-  margin: 0; 
-  padding: 1rem;
-}
-
-a {
-  color: #fff;
-  text-decoration: underline;
-}
-
-a:hover {
-  color: var(--brand);
-}
-
-.btn {
-  display: inline-flex; 
-  align-items: center;
-  border: none; 
-  border-radius: .3rem; 
-  padding: .6rem 1rem; 
-  font-weight: bold; 
-  cursor: pointer;
-  text-decoration: none;
-  background: #222;
-  color: #8d8d8d;
-  font-size: 1rem;
-}
-
-.btn-primary {
-  background-color: var(--brand);
-  color: #000 !important;
-}
-
-.servers {
-  border-collapse: collapse;  
-  border: 1px dashed #333; 
-  margin-bottom: 1.2rem;
-}
-
-.servers td, .servers th {
-  border: 1px dashed #333; 
-  padding: .6rem 1rem;
-}
-
-.servers .key {
-  font-size: .85rem;
-  display: flex;
-  align-items: center;
-}
-
-.servers th {
-  color: #8d8d8d;
-  font-size: .95rem;
-  text-align: left;
-}
-
-.notice {
-  padding: 1rem;
-  margin-bottom: 1.2rem;
-  border: 1px dashed #333;
-  color: #8d8d8d;
-}
-
-.buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: .8rem;
-}
-
-.delete {
-  color: #ee2f3c !important;
-  cursor: pointer;
-  text-decoration: none;
-  font-size: .8rem;
-}
-
-.form-section {
-  margin-bottom: 1.2rem;
-}
-
-.form-section label {
-  margin-bottom: .4rem;
-  color: #bdbdbd;
-  font-size: .8rem;
-  display: block;
-}
-
-.form-section input[type=\"text\"] {
-  background: #222;
-  border: none;
-  border-radius: .3rem;
-  padding: .6rem 1.2rem;
-  color: #fff;
-}
-
-.form-section input:focus {
-  outline: none;
-}
-"
-
 pub fn layout(children: List(element.Element(a))) -> element.Element(a) {
   html.html([attr.lang("en")], [
     html.head([], [
-      html.style([], css),
+      html.meta([attr.charset("UTF-8")]),
+      html.meta([
+        attr.content("width=device-width, initial-scale=1.0"),
+        attr.name("viewport"),
+      ]),
+      html.title([], "hytapi"),
+      html.link([attr.href("/main.css"), attr.rel("stylesheet")]),
     ]),
     html.body([], [
       html.h2([], [html.text("hytapi - get your hytale playercount")]),
