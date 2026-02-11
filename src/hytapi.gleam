@@ -28,8 +28,9 @@ const auth_cookie = "__AUTH"
 
 pub fn handle(req, env, ctx) {
   let assert Ok(db) = bindings.d1_database(env, "hytapi_prod")
+    as "can't find the database binding"
 
-  let assert Ok(secrets) = get_secrets(env)
+  let assert Ok(secrets) = get_secrets(env) as "can't get secrets"
   let req = conversation.to_gleam_request(req)
 
   let context = Context(secrets, req, env, ctx, db)

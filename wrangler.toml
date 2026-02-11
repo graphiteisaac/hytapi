@@ -9,3 +9,18 @@ binding = "hytapi_prod"
 database_name = "hytapi_prod"
 database_id = "ac6d018a-ae20-4ed0-9e75-f96aaf64b5fc"
 migrations_dir = "./migrations"
+
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1
