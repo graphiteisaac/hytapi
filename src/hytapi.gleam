@@ -124,6 +124,12 @@ fn playercount(
       _,
       response.new(400)
         |> response.set_header("Content-Type", "application/json")
+        |> response.set_header("Access-Control-Allow-Origin", "*")
+        |> response.set_header(
+          "Access-Control-Allow-Methods",
+          "GET,HEAD,POST,OPTIONS",
+        )
+        |> response.set_header("Access-Control-Max-Age", "86400")
         |> response.set_body(conversation.Text(
           "{\"error\":\"Server not found\"}",
         )),
@@ -133,9 +139,9 @@ fn playercount(
   response.new(200)
   |> response.set_header("Content-Type", "application/json")
   |> response.set_body(conversation.Text(
-    "{\"players\":\""
+    "{\"players\":"
     <> int.to_string(status.players)
-    <> "\",\"updated_at\":"
+    <> ",\"updated_at\":"
     <> int.to_string(status.updated_at)
     <> "}",
   ))
