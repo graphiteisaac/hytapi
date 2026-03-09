@@ -111,6 +111,7 @@ fn playercount(
     |> promise.map(result.replace_error(
       _,
       response.new(400)
+        |> with_cors
         |> response.set_header("Content-Type", "application/json")
         |> response.set_body(conversation.Text(
           "{\"error\":\"DNS resolution failed\"}",
@@ -123,13 +124,8 @@ fn playercount(
     |> promise.map(result.replace_error(
       _,
       response.new(400)
+        |> with_cors
         |> response.set_header("Content-Type", "application/json")
-        |> response.set_header("Access-Control-Allow-Origin", "*")
-        |> response.set_header(
-          "Access-Control-Allow-Methods",
-          "GET,HEAD,POST,OPTIONS",
-        )
-        |> response.set_header("Access-Control-Max-Age", "86400")
         |> response.set_body(conversation.Text(
           "{\"error\":\"Server not found\"}",
         )),
@@ -138,6 +134,7 @@ fn playercount(
 
   response.new(200)
   |> response.set_header("Content-Type", "application/json")
+  |> with_cors
   |> response.set_body(conversation.Text(
     "{\"players\":"
     <> int.to_string(status.players)
@@ -597,4 +594,14 @@ fn user_ip(req: Request(a)) -> String {
     Ok(ip) -> ip
     Error(_) -> "0.0.0.0"
   }
+}
+
+fn with_cors(res: Response(a)) -> Response(a) {
+  res
+  |> response.set_header("Access-Control-Allow-Origin", "*")
+  |> response.set_header(
+    "Access-Control-Allow-Methods",
+    "GET,HEAD,POST,OPTIONS",
+  )
+  |> response.set_header("Access-Control-Max-Age", "86400")
 }
